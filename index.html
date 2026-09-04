@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Two Hundred Billion Suns</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#06040f; --ink:#ece7ff; --ink-dim:#8c86b8; --ink-faint:#4d4870;
+    --gold:#ffd97a; --pink:#ff4fa3; --cyan:#3fe0e6; --violet:#a06bff;
+    --display:"Silkscreen","Press Start 2P",ui-monospace,monospace;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  html,body{margin:0;height:100%;background:var(--ground);color:var(--ink);overflow:hidden;font-family:var(--mono)}
+  canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab;image-rendering:pixelated;image-rendering:crisp-edges}
+  canvas#c.dragging{cursor:grabbing}
+  .copy{position:fixed;left:max(20px,env(safe-area-inset-left));top:max(16px,env(safe-area-inset-top));pointer-events:none}
+  h1{font-family:var(--display);font-weight:700;font-size:clamp(13px,1.7vw,20px);line-height:1;margin:0;letter-spacing:.08em;white-space:nowrap}
+  h1 span{display:inline-block}   /* one colour per letter, set inline; static, never animated */
+  .hud{position:fixed;left:max(24px,env(safe-area-inset-left));bottom:max(20px,env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px;pointer-events:none;font:400 12px/1.5 var(--mono);color:var(--ink-dim);font-variant-numeric:tabular-nums}
+  .hud b{color:var(--ink);font-weight:500}
+  .spec{display:flex;gap:6px;align-items:center}
+  .spec i{display:inline-block;width:10px;height:10px;image-rendering:pixelated}
+  .spec span{letter-spacing:.18em;font-size:10px;color:var(--ink-faint)}
+  .hints{position:fixed;right:max(24px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));text-align:right;pointer-events:none;font:400 12px/1.6 var(--mono);color:var(--ink-faint);max-width:44vw}
+  .hints kbd{font:inherit;color:var(--ink-dim);border:1px solid var(--ink-faint);border-radius:3px;padding:0 5px}
+  .err{position:fixed;inset:0;display:none;place-items:center;text-align:center;padding:24px;font:400 15px/1.6 var(--mono);color:var(--ink-dim);background:var(--ground)}
+  @media (max-width:640px){.hints{display:none}}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Interactive pixel-art spiral galaxy. Drag to rotate, scroll to zoom."></canvas>
+<div class="copy">
+  <h1 aria-label="Two hundred billion suns"><span style="color:#8fb8ff">T</span><span style="color:#3fe0e6">W</span><span style="color:#f4f2ff">O</span> <span style="color:#ffd97a">H</span><span style="color:#ffa257">U</span><span style="color:#ff6b5a">N</span><span style="color:#ff4fa3">D</span><span style="color:#a06bff">R</span><span style="color:#8fb8ff">E</span><span style="color:#3fe0e6">D</span> <span style="color:#f4f2ff">B</span><span style="color:#ffd97a">I</span><span style="color:#ffa257">L</span><span style="color:#ff6b5a">L</span><span style="color:#ff4fa3">I</span><span style="color:#a06bff">O</span><span style="color:#8fb8ff">N</span> <span style="color:#3fe0e6">S</span><span style="color:#f4f2ff">U</span><span style="color:#ffd97a">N</span><span style="color:#ffa257">S</span></h1>
+</div>
+<div class="hud">
+  <div><b id="nstars">0</b> stars &middot; <b id="pix">3</b>&thinsp;px blocks</div>
+  <div class="spec" aria-label="Spectral classes O B A F G K M, hottest to coolest">
+    <i style="background:#8fb8ff"></i><i style="background:#c4d6ff"></i><i style="background:#f4f2ff"></i><i style="background:#fff2c8"></i><i style="background:#ffd97a"></i><i style="background:#ffa257"></i><i style="background:#ff6b5a"></i>
+    <span>O B A F G K M</span>
+  </div>
+</div>
+<div class="hints">Drag to turn &middot; scroll or pinch to fly closer<br><kbd>P</kbd> pixel size &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> nudge<br>Every point is a star. None are real.</div>
+<div class="err" id="err">WebGL isn't available here, so the galaxy can't be drawn.<br>Try another browser or device.</div>
+
+<script>
+(function(){
+  'use strict';
+  const canvas=document.getElementById('c');
+  const gl=canvas.getContext('webgl',{antialias:false,alpha:false,depth:false,powerPreference:'high-performance'});
+  if(!gl){document.getElementById('err').style.display='grid';return;}
+
+  // ---------- seeded noise: the same galaxy every time ----------
+  let seed=20260904;
+  const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  const gauss=()=>{let u=0,v=0;while(!u)u=rnd();while(!v)v=rnd();return Math.sqrt(-2*Math.log(u))*Math.cos(6.283185307*v);};
+  const pick=(w)=>{let t=rnd()*w.reduce((a,b)=>a+b,0);for(let k=0;k<w.length;k++){t-=w[k];if(t<=0)return k;}return w.length-1;};
+
+  // ---------- palette: spectral classes O B A F G K M, plus nebular gas ----------
+  const CLASSES=[[0.56,0.72,1.00],[0.77,0.84,1.00],[0.96,0.95,1.00],[1.00,0.95,0.78],[1.00,0.85,0.48],[1.00,0.64,0.34],[1.00,0.42,0.35]];
+  const ARM_W=[[0.30,0.22,0.16,0.12,0.10,0.06,0.04],   // arms: young, blue-heavy
+               [0.04,0.08,0.14,0.18,0.22,0.20,0.14]];  // bulge & halo: old, red-heavy
+  const ARM_TINT=[[0.92,0.96,1.08],[0.94,1.06,1.02],[1.04,0.94,1.06],[1.06,1.00,0.90]]; // one tint per arm
+  const NEBULA=[[1.00,0.31,0.64],[0.25,0.88,0.90],[0.63,0.42,1.00],[1.00,0.55,0.25]];
+
+  // ---------- build ----------
+  const mobile=/Mobi|Android/i.test(navigator.userAgent);
+  const N=mobile?140000:360000;
+  const pos=new Float32Array(N*3),col=new Float32Array(N*3),siz=new Float32Array(N),kind=new Float32Array(N);
+  const ARMS=4,TWIST=2.6,R=1.0;
+  let i=0;
+  const put=(x,y,z,c,s,k,b)=>{pos[i*3]=x;pos[i*3+1]=y;pos[i*3+2]=z;col[i*3]=c[0]*b;col[i*3+1]=c[1]*b;col[i*3+2]=c[2]*b;siz[i]=s;kind[i]=k;i++;};
+
+  // bulge — old, warm, dense
+  const NB=Math.floor(N*0.17);
+  for(let k=0;k<NB;k++){
+    const x=gauss()*0.15,y=gauss()*0.09,z=gauss()*0.15;
+    const w=Math.max(0,1-Math.hypot(x,y,z)*3);
+    const c=CLASSES[pick(ARM_W[1])];
+    put(x,y,z,[c[0],c[1]*(0.9+0.1*w),c[2]*(0.7+0.3*w)],1+(rnd()<0.35?1:0),0,0.75+0.35*w);
+  }
+  // disc + arms — young, blue, with gas clouds and a few giants
+  const ND=Math.floor(N*0.78);
+  for(let k=0;k<ND;k++){
+    const r=Math.sqrt(rnd())*R*(0.15+0.85*Math.sqrt(rnd()));
+    const arm=Math.floor(rnd()*ARMS);
+    const inArm=rnd()<0.72;
+    const base=(arm/ARMS)*6.283185307+Math.log(r*7+1)*TWIST;
+    const spread=inArm?0.11+0.17*r:1.4;
+    const a=base+gauss()*spread;
+    const thick=0.02+0.05*(1-r);
+    const x=Math.cos(a)*r,z=Math.sin(a)*r,y=gauss()*thick;
+    const tint=ARM_TINT[arm];
+    const roll=rnd();
+    if(inArm&&roll<0.030){                                   // nebula cloud
+      const c=NEBULA[pick([0.38,0.30,0.22,0.10])];
+      put(x,y,z,c,4+rnd()*6,1,0.16+rnd()*0.10);
+    }else if(inArm&&roll<0.036){                             // a giant: pixel cross
+      const c=CLASSES[pick([0.35,0.25,0.15,0.05,0.05,0.05,0.10])];
+      put(x,y,z,[c[0]*tint[0],c[1]*tint[1],c[2]*tint[2]],3+(rnd()<0.3?1:0),2,1.0);
+    }else{                                                   // an ordinary star
+      const c=CLASSES[pick(inArm?ARM_W[0]:ARM_W[1])];
+      const b=0.55+rnd()*0.45;
+      put(x,y,z,[c[0]*tint[0],c[1]*tint[1],c[2]*tint[2]],1+(rnd()<0.28?1:0),0,b);
+    }
+  }
+  // halo — sparse, old, faint
+  while(i<N){
+    const d=0.6+Math.pow(rnd(),0.5)*1.4;
+    const u=rnd()*2-1,ph=rnd()*6.283185307,sq=Math.sqrt(1-u*u);
+    const c=CLASSES[pick(ARM_W[1])];
+    put(sq*Math.cos(ph)*d,u*d*0.8,sq*Math.sin(ph)*d,c,1,0,0.35+rnd()*0.3);
+  }
+  document.getElementById('nstars').textContent=N.toLocaleString('en-ZA').replace(/ /g,' ');
+
+  // ---------- shaders ----------
+  const compile=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);
+    if(!gl.getShaderParameter(o,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(o));return o;};
+  const program=(v,f)=>{const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,v));gl.attachShader(p,compile(gl.FRAGMENT_SHADER,f));gl.linkProgram(p);
+    if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;};
+
+  const ptsProg=program(`
+    attribute vec3 aPos; attribute vec3 aCol; attribute float aSize; attribute float aKind;
+    uniform mat4 uMV,uP; uniform float uScale; uniform float uGain;
+    varying vec3 vCol; varying float vKind;
+    void main(){
+      vec4 mv=uMV*vec4(aPos,1.0);
+      gl_Position=uP*mv;
+      float d=max(0.35,-mv.z);
+      float s=aSize*uScale/d;
+      if(aKind>1.5) s=max(s,3.0);              // a cross needs room to read as a cross
+      if(aKind>0.5&&aKind<1.5) s=max(s,3.0);   // gas clouds stay soft, never single pixels
+      gl_PointSize=floor(clamp(s,1.0,14.0));   // integer sizes: crisp blocks on the low-res grid
+      // Rendering at 1/PIX resolution packs PIX*PIX stars into every pixel, and additive
+      // blending saturates to white. uGain compensates; giants and gas get a boost so
+      // they still read against the dimmed field.
+      float g=uGain; if(aKind>2.5) g=1.5; else if(aKind>1.5) g*=3.0; else if(aKind>0.5) g*=2.2;   // voyagers ignore the field gain
+      vCol=aCol*g; vKind=aKind;
+    }`,`
+    precision mediump float;
+    varying vec3 vCol; varying float vKind;
+    void main(){
+      vec2 p=gl_PointCoord*2.0-1.0;
+      float a=1.0;
+      if(vKind>2.5){ }                                                          // voyager: solid block
+      else if(vKind>1.5){ if(abs(p.x)>0.36&&abs(p.y)>0.36) discard; }          // pixel cross
+      else if(vKind>0.5){ float r2=dot(p,p); if(r2>1.0) discard; a=exp(-r2*2.4); } // soft cloud
+      gl_FragColor=vec4(vCol*a,a);
+    }`);
+
+  const QUAD_VS=`attribute vec2 aQ; varying vec2 vUv; void main(){vUv=aQ*0.5+0.5; gl_Position=vec4(aQ,0.0,1.0);}`;
+  const blurProg=program(QUAD_VS,`
+    precision mediump float;
+    uniform sampler2D uTex; uniform vec2 uDir; uniform float uThr;
+    varying vec2 vUv;
+    vec3 tap(vec2 uv){ return max(texture2D(uTex,uv).rgb-vec3(uThr),0.0); }
+    void main(){
+      vec3 c=tap(vUv)*0.227;
+      c+=(tap(vUv+uDir*1.5)+tap(vUv-uDir*1.5))*0.194;
+      c+=(tap(vUv+uDir*3.0)+tap(vUv-uDir*3.0))*0.121;
+      c+=(tap(vUv+uDir*4.5)+tap(vUv-uDir*4.5))*0.054;
+      c+=(tap(vUv+uDir*6.0)+tap(vUv-uDir*6.0))*0.016;
+      gl_FragColor=vec4(c,1.0);
+    }`);
+  const compProg=program(QUAD_VS,`
+    precision mediump float;
+    uniform sampler2D uScene,uBloom; uniform float uBloomK;
+    varying vec2 vUv;
+    void main(){
+      vec3 c=texture2D(uScene,vUv).rgb+texture2D(uBloom,vUv).rgb*uBloomK;
+      gl_FragColor=vec4(c,1.0);
+    }`);
+
+  // ---------- buffers ----------
+  const mkBuf=(data)=>{const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);return b;};
+  const bPos=mkBuf(pos),bCol=mkBuf(col),bSiz=mkBuf(siz),bKind=mkBuf(kind);
+  const bQuad=mkBuf(new Float32Array([-1,-1, 1,-1, -1,1, 1,1]));
+
+  // ---------- voyagers: a few bright objects travelling through the disc ----------
+  // Slow, gently inclined elliptical orbits, faster near the core (Kepler-style), each
+  // trailing the last second or so of its own path. Positions advance a little every frame -
+  // nothing blinks, nothing jumps, and under reduced-motion they simply hold still.
+  const VN=8, TR=26, HIST=96, STEP=3;
+  const VCOL=[[0.25,0.88,0.90],[1.0,0.85,0.48],[1.0,0.31,0.64],[0.63,0.42,1.0],[0.96,0.95,1.0],[1.0,0.64,0.34],[0.56,0.72,1.0],[1.0,0.42,0.35]];
+  const voy=[];
+  for(let k=0;k<VN;k++){
+    voy.push({a:0.45+rnd()*0.95, e:0.25+rnd()*0.45, inc:(rnd()-0.5)*0.5, node:rnd()*6.283185307,
+              th:rnd()*6.283185307, rate:(0.6+rnd()*0.8)*(6.283185307/75), dir:rnd()<0.5?-1:1,
+              col:VCOL[k%VCOL.length], hist:new Float32Array(HIST*3), hn:0, hi:0});
+  }
+  const VM=VN*(1+TR);
+  const vpos=new Float32Array(VM*3),vcol=new Float32Array(VM*3),vsiz=new Float32Array(VM),vkind=new Float32Array(VM).fill(3);
+  const bVPos=mkBuf(vpos),bVCol=mkBuf(vcol),bVSiz=mkBuf(vsiz),bVKind=mkBuf(vkind);
+  let lastFrameT=performance.now();
+  function orbitPos(o){
+    const r=o.a*(1-o.e*o.e)/(1+o.e*Math.cos(o.th));
+    const px=r*Math.cos(o.th),py=r*Math.sin(o.th);
+    const X=px,Z=py*Math.cos(o.inc),Y=py*Math.sin(o.inc);        // disc is the XZ plane; Y is thickness
+    const c=Math.cos(o.node),s=Math.sin(o.node);
+    return [X*c-Z*s, Y, X*s+Z*c];
+  }
+  function stepVoyagers(dt){
+    let j=0;
+    for(const o of voy){
+      if(dt>0){const f=1+o.e*Math.cos(o.th);o.th+=o.dir*o.rate*f*f*dt;}   // sweeps equal areas: quicker near the core
+      const p=orbitPos(o);
+      o.hist[o.hi*3]=p[0];o.hist[o.hi*3+1]=p[1];o.hist[o.hi*3+2]=p[2];
+      o.hi=(o.hi+1)%HIST; if(o.hn<HIST)o.hn++;
+      vpos[j*3]=p[0];vpos[j*3+1]=p[1];vpos[j*3+2]=p[2];                   // the head: a solid bright block
+      vcol[j*3]=o.col[0];vcol[j*3+1]=o.col[1];vcol[j*3+2]=o.col[2];vsiz[j]=4;j++;
+      for(let k=1;k<=TR;k++){                                             // the trail: fading, thinning
+        const idx=(o.hi-1-k*STEP+HIST*8)%HIST;
+        const b=(k*STEP<o.hn)?Math.pow(1-k/TR,1.6)*0.9:0;
+        vpos[j*3]=o.hist[idx*3];vpos[j*3+1]=o.hist[idx*3+1];vpos[j*3+2]=o.hist[idx*3+2];
+        vcol[j*3]=o.col[0]*b;vcol[j*3+1]=o.col[1]*b;vcol[j*3+2]=o.col[2]*b;vsiz[j]=k<TR*0.35?2.4:1.2;j++;
+      }
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER,bVPos);gl.bufferData(gl.ARRAY_BUFFER,vpos,gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER,bVCol);gl.bufferData(gl.ARRAY_BUFFER,vcol,gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER,bVSiz);gl.bufferData(gl.ARRAY_BUFFER,vsiz,gl.DYNAMIC_DRAW);
+  }
+  const loc=(p,n)=>gl.getAttribLocation(p,n);
+  const uni=(p,n)=>gl.getUniformLocation(p,n);
+  const L={pos:loc(ptsProg,'aPos'),col:loc(ptsProg,'aCol'),siz:loc(ptsProg,'aSize'),kind:loc(ptsProg,'aKind'),
+           qb:loc(blurProg,'aQ'),qc:loc(compProg,'aQ')};
+  const U={mv:uni(ptsProg,'uMV'),p:uni(ptsProg,'uP'),scale:uni(ptsProg,'uScale'),gain:uni(ptsProg,'uGain'),
+           bTex:uni(blurProg,'uTex'),bDir:uni(blurProg,'uDir'),bThr:uni(blurProg,'uThr'),
+           cScene:uni(compProg,'uScene'),cBloom:uni(compProg,'uBloom'),cK:uni(compProg,'uBloomK')};
+  function attribs(list){ // enable exactly these, nothing else
+    for(let a=0;a<8;a++)gl.disableVertexAttribArray(a);
+    for(const [l,b,n] of list){gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.enableVertexAttribArray(l);gl.vertexAttribPointer(l,n,gl.FLOAT,false,0,0);}
+  }
+
+  // ---------- low-res render targets (this is what makes it pixel art) ----------
+  const SIZES=[2,3,4,6]; let pixIdx=mobile?0:1; let PIX=SIZES[pixIdx];
+  let lowW=0,lowH=0;
+  const mkTarget=(w,h,filter)=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,filter);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,filter);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+    return {tex:t,fb:f};};
+  let scene,blurA,blurB;
+  function rebuildTargets(){
+    lowW=Math.max(64,Math.ceil(canvas.width/PIX)); lowH=Math.max(64,Math.ceil(canvas.height/PIX));
+    for(const t of [scene,blurA,blurB]) if(t){gl.deleteTexture(t.tex);gl.deleteFramebuffer(t.fb);}
+    scene=mkTarget(lowW,lowH,gl.NEAREST);   // nearest: the stars stay as hard blocks when upscaled
+    blurA=mkTarget(lowW,lowH,gl.LINEAR);    // linear: the glow is allowed to be smooth
+    blurB=mkTarget(lowW,lowH,gl.LINEAR);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    document.getElementById('pix').textContent=PIX;
+  }
+  function resize(){const dpr=Math.min(2,devicePixelRatio||1);
+    const w=Math.floor(innerWidth*dpr),h=Math.floor(innerHeight*dpr);
+    if(w<1||h<1)return;                            // not laid out yet - touch nothing
+    if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;rebuildTargets();fitToScreen();}}
+  addEventListener('resize',resize);
+
+  // ---------- free 3D tumbling ----------
+  let rot=[1,0,0, 0,1,0, 0,0,1];
+  const mul3=(a,b)=>{const o=new Array(9);for(let c=0;c<3;c++)for(let r=0;r<3;r++)o[c*3+r]=a[r]*b[c*3]+a[3+r]*b[c*3+1]+a[6+r]*b[c*3+2];return o;};
+  const axisRot=(ax,ay,az,ang)=>{const c=Math.cos(ang),s=Math.sin(ang),t=1-c;
+    return [t*ax*ax+c,t*ax*ay+s*az,t*ax*az-s*ay, t*ax*ay-s*az,t*ay*ay+c,t*ay*az+s*ax, t*ax*az+s*ay,t*ay*az-s*ax,t*az*az+c];};
+  const tilt=(dx,dy)=>{rot=mul3(axisRot(0,1,0,dx),rot);rot=mul3(axisRot(1,0,0,dy),rot);};
+  tilt(0,-0.95);
+
+  let dist=2.4,targetDist=2.4,vx=0,vy=0,lastInteract=0;
+  // Portrait phones see a much narrower horizontal field than a landscape screen, so the
+  // disc overflowed the sides. Start far enough back that the whole disc fits, whatever the
+  // shape - until the person zooms themselves, after which their choice is respected.
+  let userZoomed=false, offX=0;
+  function fitToScreen(){
+    // BUG FIXED 2026-09-04: on first layout the canvas can be 0x0. That made aspect 0, fit
+    // Infinity, and dist NaN for the life of the page - a blank galaxy, on desktop only, with
+    // no error anywhere. Found by writing the live values into the DOM, not by reading code.
+    if(!(canvas.width>0&&canvas.height>0)) return;
+    const aspect=canvas.width/canvas.height;
+    const fit=1.25/(Math.tan(0.475)*aspect);       // distance at which the disc (R=1) spans the width
+    if(!userZoomed&&isFinite(fit)) targetDist=clampD(Math.max(2.4,fit));
+    offX=aspect>1.05?0.45*Math.min(1,(aspect-1.05)/0.7):0;   // shove the core right only when there is room
+  }
+  // Slow, smooth, and OFF under reduced-motion. No twinkle anywhere: brightness never changes frame to frame.
+  const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  const idleSpin=reduced?0:0.0006;
+  const clampD=(d)=>Math.min(6,Math.max(0.12,d));
+
+  // ---------- input ----------
+  const ptrs=new Map();let lastPinch=0,lastX=0,lastY=0,lastT=0;
+  canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+    lastX=e.clientX;lastY=e.clientY;lastT=performance.now();vx=vy=0;canvas.classList.add('dragging');
+    if(ptrs.size===2){const p=[...ptrs.values()];lastPinch=Math.hypot(p[0][0]-p[1][0],p[0][1]-p[1][1]);}});
+  canvas.addEventListener('pointermove',e=>{
+    if(!ptrs.has(e.pointerId))return;
+    ptrs.set(e.pointerId,[e.clientX,e.clientY]);lastInteract=performance.now();
+    if(ptrs.size===1){const dx=e.clientX-lastX,dy=e.clientY-lastY,k=0.006;tilt(dx*k,dy*k);
+      const now=performance.now(),dt=Math.max(1,now-lastT);vx=dx*k/dt*16;vy=dy*k/dt*16;lastX=e.clientX;lastY=e.clientY;lastT=now;}
+    else if(ptrs.size===2){const p=[...ptrs.values()];const d=Math.hypot(p[0][0]-p[1][0],p[0][1]-p[1][1]);
+      if(lastPinch>0){userZoomed=true;targetDist=clampD(targetDist*lastPinch/d);}lastPinch=d;}});
+  const up=e=>{ptrs.delete(e.pointerId);lastPinch=0;if(!ptrs.size)canvas.classList.remove('dragging');};
+  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+  canvas.addEventListener('wheel',e=>{e.preventDefault();lastInteract=performance.now();userZoomed=true;targetDist=clampD(targetDist*Math.exp(e.deltaY*0.0012));},{passive:false});
+  addEventListener('keydown',e=>{const k=0.05;lastInteract=performance.now();
+    if(e.key==='ArrowLeft')tilt(-k,0);else if(e.key==='ArrowRight')tilt(k,0);
+    else if(e.key==='ArrowUp')tilt(0,-k);else if(e.key==='ArrowDown')tilt(0,k);
+    else if(e.key==='+'||e.key==='='){userZoomed=true;targetDist=clampD(targetDist*0.85);}
+    else if(e.key==='-'){userZoomed=true;targetDist=clampD(targetDist*1.15);}
+    else if(e.key==='p'||e.key==='P'){pixIdx=(pixIdx+1)%SIZES.length;PIX=SIZES[pixIdx];rebuildTargets();}});
+
+  // ---------- render ----------
+  const persp=(fov,asp,n,f)=>{const t=1/Math.tan(fov/2);return [t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/(n-f),-1, 0,0,2*f*n/(n-f),0];};
+  gl.enable(gl.BLEND);gl.disable(gl.DEPTH_TEST);
+
+  function frame(){
+    resize();
+    if(!scene){requestAnimationFrame(frame);return;}   // no size yet, so nothing to draw into
+    if(!ptrs.size){tilt(vx,vy);vx*=0.94;vy*=0.94;if(performance.now()-lastInteract>4000)tilt(idleSpin,0);}
+    if(!isFinite(dist)||!isFinite(targetDist)){dist=targetDist=2.4;}   // never let a bad number stick
+    dist+=(targetDist-dist)*0.12;
+    const r=rot;
+
+    // 1. stars -> low-res scene, additive
+    gl.bindFramebuffer(gl.FRAMEBUFFER,scene.fb);gl.viewport(0,0,lowW,lowH);
+    gl.blendFunc(gl.ONE,gl.ONE);
+    gl.clearColor(0.024,0.016,0.06,1);gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(ptsProg);
+    attribs([[L.pos,bPos,3],[L.col,bCol,3],[L.siz,bSiz,1],[L.kind,bKind,1]]);
+    // x-offset: the core sits right of centre so the headline reads over the sparse edge
+    gl.uniformMatrix4fv(U.mv,false,[r[0],r[1],r[2],0, r[3],r[4],r[5],0, r[6],r[7],r[8],0, offX,0,-dist,1]);
+    gl.uniformMatrix4fv(U.p,false,persp(0.95,lowW/lowH,0.02,30));
+    gl.uniform1f(U.scale,lowH*0.0030);
+    gl.uniform1f(U.gain,Math.max(0.03,0.55/(PIX*PIX)));
+    gl.drawArrays(gl.POINTS,0,N);
+
+    // 1b. voyagers, same additive pass. dt is capped so a tab that was hidden for a while
+    //     resumes smoothly instead of jumping the objects across the disc.
+    const nowT=performance.now();
+    const dt=Math.max(0,Math.min(0.05,(nowT-lastFrameT)/1000)); lastFrameT=nowT;
+    stepVoyagers(reduced?0:dt);
+    attribs([[L.pos,bVPos,3],[L.col,bVCol,3],[L.siz,bVSiz,1],[L.kind,bVKind,1]]);
+    gl.drawArrays(gl.POINTS,0,VM);
+
+    // 2. bloom: threshold + horizontal blur, then vertical
+    gl.blendFunc(gl.ONE,gl.ZERO);
+    gl.useProgram(blurProg);attribs([[L.qb,bQuad,2]]);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,blurA.fb);gl.bindTexture(gl.TEXTURE_2D,scene.tex);
+    gl.uniform1i(U.bTex,0);gl.uniform2f(U.bDir,1/lowW,0);gl.uniform1f(U.bThr,0.60);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,blurB.fb);gl.bindTexture(gl.TEXTURE_2D,blurA.tex);
+    gl.uniform2f(U.bDir,0,1/lowH);gl.uniform1f(U.bThr,0.0);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+
+    // 3. composite to screen: nearest-upscaled stars + smooth glow
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,canvas.width,canvas.height);
+    gl.useProgram(compProg);attribs([[L.qc,bQuad,2]]);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,scene.tex);gl.uniform1i(U.cScene,0);
+    gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,blurB.tex);gl.uniform1i(U.cBloom,1);
+    gl.uniform1f(U.cK,0.6);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+
+    requestAnimationFrame(frame);
+  }
+  resize();
+  frame();
+})();
+</script>
+</body>
+</html>
