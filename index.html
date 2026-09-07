@@ -35,7 +35,7 @@
   <h1 aria-label="Two hundred billion suns"><span style="color:#8fb8ff">T</span><span style="color:#3fe0e6">W</span><span style="color:#f4f2ff">O</span> <span style="color:#ffd97a">H</span><span style="color:#ffa257">U</span><span style="color:#ff6b5a">N</span><span style="color:#ff4fa3">D</span><span style="color:#a06bff">R</span><span style="color:#8fb8ff">E</span><span style="color:#3fe0e6">D</span> <span style="color:#f4f2ff">B</span><span style="color:#ffd97a">I</span><span style="color:#ffa257">L</span><span style="color:#ff6b5a">L</span><span style="color:#ff4fa3">I</span><span style="color:#a06bff">O</span><span style="color:#8fb8ff">N</span> <span style="color:#3fe0e6">S</span><span style="color:#f4f2ff">U</span><span style="color:#ffd97a">N</span><span style="color:#ffa257">S</span></h1>
 </div>
 <div class="hud">
-  <div><b id="nstars">0</b> stars &middot; <b id="pix">3</b>&thinsp;px blocks</div>
+  <div><b id="nstars">0</b> stars &middot; <b id="pix">1</b>&thinsp;<span id="pixlabel">px &middot; full resolution</span></div>
   <div class="spec" aria-label="Spectral classes O B A F G K M, hottest to coolest">
     <i style="background:#8fb8ff"></i><i style="background:#c4d6ff"></i><i style="background:#f4f2ff"></i><i style="background:#fff2c8"></i><i style="background:#ffd97a"></i><i style="background:#ffa257"></i><i style="background:#ff6b5a"></i>
     <span>O B A F G K M</span>
@@ -233,7 +233,9 @@
   }
 
   // ---------- low-res render targets (this is what makes it pixel art) ----------
-  const SIZES=[2,3,4,6]; let pixIdx=mobile?0:1; let PIX=SIZES[pixIdx];
+  // 1 = full native resolution (default since 2026-09-07 - the chunky sizes smeared the arms
+  // into blobs). The retro block sizes stay on the P key for anyone who wants them.
+  const SIZES=[1,2,3,4,6]; let pixIdx=0; let PIX=SIZES[pixIdx];
   let lowW=0,lowH=0;
   const mkTarget=(w,h,filter)=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
@@ -250,6 +252,7 @@
     blurB=mkTarget(lowW,lowH,gl.LINEAR);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     document.getElementById('pix').textContent=PIX;
+    document.getElementById('pixlabel').textContent=PIX===1?'px · full resolution':'px blocks';
   }
   function resize(){const dpr=Math.min(2,devicePixelRatio||1);
     const w=Math.floor(innerWidth*dpr),h=Math.floor(innerHeight*dpr);
