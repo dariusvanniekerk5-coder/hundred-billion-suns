@@ -41,7 +41,7 @@
     <span>O B A F G K M</span>
   </div>
 </div>
-<div class="hints">Drag to turn &middot; scroll or pinch to fly closer<br><kbd>P</kbd> pixel size &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> nudge<br>Every point is a star. None are real.</div>
+<div class="hints">Drag to turn &middot; scroll or pinch to fly closer<br><kbd>P</kbd> pixel size &middot; <kbd>S</kbd> save a 4K image &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> nudge<br>Every point is a star. None are real.</div>
 <div class="err" id="err">WebGL isn't available here, so the galaxy can't be drawn.<br>Try another browser or device.</div>
 
 <script>
@@ -254,7 +254,7 @@
     document.getElementById('pix').textContent=PIX;
     document.getElementById('pixlabel').textContent=PIX===1?'px · full resolution':'px blocks';
   }
-  function resize(){const dpr=Math.min(2,devicePixelRatio||1);
+  function resize(){const dpr=Math.min(3,devicePixelRatio||1);   // 3: a 4K or retina screen gets every native pixel
     const w=Math.floor(innerWidth*dpr),h=Math.floor(innerHeight*dpr);
     if(w<1||h<1)return;                            // not laid out yet - touch nothing
     if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;rebuildTargets();fitToScreen();}}
@@ -308,6 +308,7 @@
     else if(e.key==='ArrowUp')tilt(0,-k);else if(e.key==='ArrowDown')tilt(0,k);
     else if(e.key==='+'||e.key==='='){userZoomed=true;targetDist=clampD(targetDist*0.85);}
     else if(e.key==='-'){userZoomed=true;targetDist=clampD(targetDist*1.15);}
+    else if(e.key==='s'||e.key==='S')save4K();
     else if(e.key==='p'||e.key==='P'){pixIdx=(pixIdx+1)%SIZES.length;PIX=SIZES[pixIdx];rebuildTargets();}});
 
   // ---------- render ----------
@@ -320,6 +321,15 @@
     if(!ptrs.size){tilt(vx,vy);vx*=0.94;vy*=0.94;if(performance.now()-lastInteract>4000)tilt(idleSpin,0);}
     if(!isFinite(dist)||!isFinite(targetDist)){dist=targetDist=2.4;}   // never let a bad number stick
     dist+=(targetDist-dist)*0.12;
+    const nowT=performance.now();
+    const dt=Math.max(0,Math.min(0.05,(nowT-lastFrameT)/1000)); lastFrameT=nowT;
+    drawScene(reduced?0:dt);
+    requestAnimationFrame(frame);
+  }
+
+  // One complete render of the current view into whatever size the canvas is right now.
+  // frame() calls it every tick; the 4K export calls it once on a temporarily huge canvas.
+  function drawScene(dt){
     const r=rot;
 
     // 1. stars -> low-res scene, additive
@@ -337,9 +347,7 @@
 
     // 1b. voyagers, same additive pass. dt is capped so a tab that was hidden for a while
     //     resumes smoothly instead of jumping the objects across the disc.
-    const nowT=performance.now();
-    const dt=Math.max(0,Math.min(0.05,(nowT-lastFrameT)/1000)); lastFrameT=nowT;
-    stepVoyagers(reduced?0:dt);
+    stepVoyagers(dt);
     attribs([[L.pos,bVPos,3],[L.col,bVCol,3],[L.siz,bVSiz,1],[L.kind,bVKind,1]]);
     gl.drawArrays(gl.POINTS,0,VM);
 
@@ -359,8 +367,17 @@
     gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,blurB.tex);gl.uniform1i(U.cBloom,1);
     gl.uniform1f(U.cK,0.6);
     gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  }
 
-    requestAnimationFrame(frame);
+  // ---------- 4K export: the S key saves one frame of exactly this view at 3840x2160 ----------
+  function save4K(){
+    const w0=canvas.width,h0=canvas.height;
+    canvas.width=3840;canvas.height=2160;rebuildTargets();
+    drawScene(0);                                    // no time passes - the voyagers stay put
+    const url=canvas.toDataURL('image/png');         // read it back before the browser composites
+    canvas.width=w0;canvas.height=h0;rebuildTargets();
+    const a=document.createElement('a');a.href=url;a.download='two-hundred-billion-suns-4k.png';
+    document.body.appendChild(a);a.click();a.remove();
   }
   resize();
   frame();
