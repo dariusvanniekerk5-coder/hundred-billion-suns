@@ -27,6 +27,15 @@
   .hints kbd{font:inherit;color:var(--ink-dim);border:1px solid var(--ink-faint);border-radius:3px;padding:0 5px}
   .err{position:fixed;inset:0;display:none;place-items:center;text-align:center;padding:24px;font:400 15px/1.6 var(--mono);color:var(--ink-dim);background:var(--ground)}
   @media (max-width:640px){.hints{display:none}}
+  /* Save button: phones and tablets have no S key, so give them a real control.
+     Shown only for touch/small screens - desktop keeps the keyboard hint instead. */
+  #save{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));display:none;
+        font:400 13px/1 var(--mono);letter-spacing:.08em;color:var(--ink);background:rgba(20,22,34,.72);
+        border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:13px 18px;
+        -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);cursor:pointer;
+        touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+  #save[disabled]{opacity:.6}
+  @media (max-width:640px),(pointer:coarse){#save{display:block}}
 </style>
 </head>
 <body>
@@ -42,6 +51,7 @@
   </div>
 </div>
 <div class="hints">Drag to turn &middot; scroll or pinch to fly closer<br><kbd>P</kbd> pixel size &middot; <kbd>S</kbd> save a 4K image &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> nudge<br>Every point is a star. None are real.</div>
+<button id="save" type="button">Save 4K image</button>
 <div class="err" id="err">WebGL isn't available here, so the galaxy can't be drawn.<br>Try another browser or device.</div>
 
 <script>
@@ -379,6 +389,19 @@
     const a=document.createElement('a');a.href=url;a.download='two-hundred-billion-suns-4k.png';
     document.body.appendChild(a);a.click();a.remove();
   }
+  // Same export, driven by a tap. Rendering 3840x2160 blocks for a moment on a
+  // phone, so repaint the label first and do the work on the next frame.
+  const saveBtn=document.getElementById('save');
+  if(saveBtn)saveBtn.addEventListener('click',()=>{
+    if(saveBtn.disabled)return;
+    saveBtn.disabled=true;saveBtn.textContent='Saving…';
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      try{save4K();saveBtn.textContent='Saved';}
+      catch(err){saveBtn.textContent='Save failed';}
+      setTimeout(()=>{saveBtn.textContent='Save 4K image';saveBtn.disabled=false;},1600);
+    }));
+  });
+
   resize();
   frame();
 })();
