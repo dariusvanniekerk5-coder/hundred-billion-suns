@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Two Hundred Billion Suns — Companion Galaxy</title>
+<style>
+  :root{color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#05030d;color:#ece7ff;font:12px ui-monospace,monospace}canvas{display:block;width:100%;height:100%;image-rendering:pixelated}header{position:fixed;left:20px;top:18px;z-index:2;letter-spacing:.14em;text-transform:uppercase}header strong{color:#3fe0e6}header small{display:block;margin-top:8px;color:#8c86b8;letter-spacing:.04em}.panel{position:fixed;right:18px;top:18px;z-index:2;padding:12px 14px;border:1px solid #ffffff2b;border-radius:14px;background:#090b16bb;backdrop-filter:blur(10px)}button{border:1px solid #ffffff35;border-radius:999px;background:#ffffff08;color:#ece7ff;padding:8px 11px;cursor:pointer;font:inherit}button:hover{background:#3fe0e633}.hint{position:fixed;bottom:18px;left:20px;color:#4d4870}
+</style>
+</head>
+<body>
+<canvas id="galaxy" aria-label="Interactive companion spiral galaxy"></canvas>
+<header><strong>COMPANION GALAXY</strong><small>NGC VNK-02 · distant neighbour</small></header>
+<div class="panel"><button id="reset">Reset view</button> <button id="mode">Orbit mode</button></div>
+<div class="hint">drag to rotate · wheel to zoom · R reset</div>
+<script>
+(() => {
+  const canvas=document.querySelector('#galaxy'), gl=canvas.getContext('webgl',{antialias:false,alpha:false});
+  if(!gl){document.body.innerHTML='<p style="padding:2rem">WebGL is unavailable in this browser.</p>';return;}
+  const vs=`attribute vec3 p;attribute vec3 c;attribute float s;uniform float t;uniform vec2 rot;uniform float zoom;varying vec3 v;void main(){float ca=cos(rot.x),sa=sin(rot.x),cb=cos(rot.y),sb=sin(rot.y);vec3 q=vec3(ca*p.x-sa*p.z,p.y,sa*p.x+ca*p.z);q=vec3(q.x,cb*q.y-sb*q.z,sb*q.y+cb*q.z);q.z-=zoom;gl_Position=vec4(q.xy/max(.35,-q.z),0.,1.);gl_PointSize=clamp(s*2.2/max(.35,-q.z),1.,9.);v=c;}`;
+  const fs=`precision mediump float;varying vec3 v;void main(){vec2 q=gl_PointCoord*2.-1.;if(dot(q,q)>1.)discard;gl_FragColor=vec4(v,1.);}`;
+  const compile=(type,src)=>{const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s};
+  const p=gl.createProgram();gl.attachShader(p,compile(gl.VERTEX_SHADER,vs));gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);gl.useProgram(p);
+  let seed=721991;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296};
+  const n=innerWidth<700?50000:110000, positions=new Float32Array(n*3),colors=new Float32Array(n*3),sizes=new Float32Array(n);
+  const palette=[[.30,.82,1],[.63,.42,1],[1,.35,.68],[1,.78,.35],[.96,.96,1]];
+  for(let i=0;i<n;i++){
+    const companion=i%2===0, base=companion?1.15:-.98, r=Math.pow(rnd(),.58)*(.70+companion*.35), a=rnd()*6.283+Math.log(r*8+1)*(companion?2.0:2.8)+(companion?Math.PI:.0), scatter=(.035+r*.16)* (rnd()<.78?1:5);
+    positions[i*3]=base+Math.cos(a+scatter*(rnd()-.5))*r;positions[i*3+1]=(rnd()-.5)*(.025+.08*(1-r));positions[i*3+2]=Math.sin(a+scatter*(rnd()-.5))*r;
+    const c=palette[(i%7===0)?Math.floor(rnd()*palette.length):companion?1:Math.floor(rnd()*4)];const b=.35+rnd()*.75;colors.set([c[0]*b,c[1]*b,c[2]*b],i*3);sizes[i]=i%97===0?3.5:1+rnd()*1.5;
+  }
+  const buffer=(data,loc,size)=>{const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,0,0)};
+  buffer(positions,gl.getAttribLocation(p,'p'),3);buffer(colors,gl.getAttribLocation(p,'c'),3);buffer(sizes,gl.getAttribLocation(p,'s'),1);
+  const U={t:gl.getUniformLocation(p,'t'),rot:gl.getUniformLocation(p,'rot'),zoom:gl.getUniformLocation(p,'zoom')};let rx=.7,ry=-.28,zoom=3.1,auto=true,drag=null;
+  function resize(){const d=Math.min(2,devicePixelRatio||1);canvas.width=innerWidth*d;canvas.height=innerHeight*d;gl.viewport(0,0,canvas.width,canvas.height)}addEventListener('resize',resize);resize();
+  canvas.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId)});canvas.addEventListener('pointermove',e=>{if(!drag)return;rx+=(e.clientX-drag[0])*.006;ry+=(e.clientY-drag[1])*.006;drag=[e.clientX,e.clientY];auto=false});canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(1.2,Math.min(7,zoom+e.deltaY*.002))},{passive:false});
+  document.querySelector('#reset').onclick=()=>{rx=.7;ry=-.28;zoom=3.1;auto=true};document.querySelector('#mode').onclick=()=>{auto=!auto;document.querySelector('#mode').textContent=auto?'Orbit mode':'Paused'};addEventListener('keydown',e=>{if(e.key.toLowerCase()==='r')document.querySelector('#reset').click()});
+  function frame(ms){if(auto&&!drag)rx+=.0005;gl.clearColor(.012,.008,.035,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.uniform1f(U.t,ms*.001);gl.uniform2f(U.rot,rx,ry);gl.uniform1f(U.zoom,zoom);gl.drawArrays(gl.POINTS,0,n);requestAnimationFrame(frame)}requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
